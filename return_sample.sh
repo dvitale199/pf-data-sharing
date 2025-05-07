@@ -16,8 +16,8 @@ if [[ -z "$SAMPLE_ID" || -z "$USER_EMAIL" ]]; then
   exit 1
 fi
 
-LOCAL_TMP="/tmp/${SAMPLE_ID}_tmp"
-ZIP_FILE="/tmp/${SAMPLE_ID}.zip"
+LOCAL_TMP="${SAMPLE_ID}_tmp"
+ZIP_FILE="${SAMPLE_ID}.zip"
 DEST_GCS_PATH="gs://${BUCKET}/${DEST_PREFIX}/${SAMPLE_ID}.zip"
 
 # Clean up any previous local files
