@@ -4,7 +4,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import List
-from datetime import datetime
+from datetime import datetime, timedelta
 
 class EmailService:
     def __init__(self):
@@ -45,8 +45,7 @@ class EmailService:
         """
         subject = f"Data available for sample {sample_id}"
         
-        expiration_date = datetime.now().replace(microsecond=0)
-        expiration_date = expiration_date.replace(day=expiration_date.day + expires_days)
+        expiration_date = datetime.now() + timedelta(days=expires_days)
         expiration_str = expiration_date.strftime("%Y-%m-%d %H:%M:%S")
         
         html_content = f"""
@@ -103,8 +102,7 @@ class EmailService:
         """
         subject = f"Multiple samples available in Google Cloud Storage"
         
-        expiration_date = datetime.now().replace(microsecond=0)
-        expiration_date = expiration_date.replace(day=expiration_date.day + expires_days)
+        expiration_date = datetime.now() + timedelta(days=expires_days)
         expiration_str = expiration_date.strftime("%Y-%m-%d %H:%M:%S")
         
         # Format the sample IDs for display
