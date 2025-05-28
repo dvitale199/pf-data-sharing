@@ -39,23 +39,102 @@ The service combines both the backend API and frontend admin interface in a sing
   - Storage Admin (roles/storage.admin)
   - Storage Object Admin (roles/storage.objectAdmin)
 
+### Environment Variables
+
+The application requires several environment variables for proper configuration. Create a `.env` file in the project root or set these variables in your deployment environment:
+
+**Quick Start**: Copy `env.example` to `.env` and update with your values:
+```bash
+cp env.example .env
+```
+
+#### Required Variables
+
+```bash
+# Email Configuration (Required)
+EMAIL_USERNAME=your-email@example.com
+EMAIL_PASSWORD=your-app-password-or-smtp-password
+```
+
+#### Optional Variables with Defaults
+
+```bash
+# Source Bucket Configuration
+DEFAULT_SOURCE_BUCKET=your-source-bucket-name
+
+# Email Server Settings (defaults shown)
+EMAIL_SMTP_SERVER=smtp.gmail.com
+EMAIL_SMTP_PORT=587
+EMAIL_USE_TLS=True
+EMAIL_FROM_ADDRESS=your-email@example.com  # defaults to EMAIL_USERNAME
+
+# Expiration Settings (in days)
+DEFAULT_SINGLE_EXPIRATION_DAYS=7
+DEFAULT_MULTI_EXPIRATION_DAYS=30
+
+# Source Data Prefix (if your data is nested in a subfolder)
+DEFAULT_SOURCE_PREFIX=path/to/samples
+
+# Logging
+LOGGING_LEVEL=INFO
+```
+
+#### GCP Authentication
+
+```bash
+# Option 1: Service Account Key File
+GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json
+
+# Option 2: Use gcloud CLI authentication (for local development)
+# Run: gcloud auth application-default login
+```
+
+#### Email Setup Notes
+
+For **Gmail** users:
+1. Enable 2-factor authentication on your Google account
+2. Generate an "App Password" for this application
+3. Use your Gmail address as `EMAIL_USERNAME`
+4. Use the generated app password as `EMAIL_PASSWORD`
+
+For **other SMTP providers**, adjust the `EMAIL_SMTP_SERVER` and `EMAIL_SMTP_PORT` accordingly.
+
+#### Example .env File
+
+```bash
+# Required
+EMAIL_USERNAME=myapp@gmail.com
+EMAIL_PASSWORD=abcd-efgh-ijkl-mnop
+
+# Optional but recommended
+DEFAULT_SOURCE_BUCKET=my-data-bucket
+EMAIL_FROM_ADDRESS=Data Sharing Portal <myapp@gmail.com>
+DEFAULT_SINGLE_EXPIRATION_DAYS=7
+DEFAULT_MULTI_EXPIRATION_DAYS=30
+LOGGING_LEVEL=INFO
+
+# If using service account
+GOOGLE_APPLICATION_CREDENTIALS=./credentials.json
+```
+
 ### Local Development
 
 1. Clone this repository
-2. Create a `credentials.json` file with your GCP service account credentials
-3. Navigate to the app directory:
+2. Create a `.env` file with the required environment variables (see Environment Variables section above)
+3. Create a `credentials.json` file with your GCP service account credentials (if using service account authentication)
+4. Navigate to the app directory:
    ```
    cd app
    ```
-4. Install dependencies:
+5. Install dependencies:
    ```
    pip install -r requirements.txt
    ```
-5. Run the application:
+6. Run the application:
    ```
    python main.py
    ```
-6. Access the admin UI at http://localhost:8000/ui/
+7. Access the admin UI at http://localhost:8000/ui/
    - Default login: username: `admin` / password: `admin`
 
 ### Cloud Run Deployment
