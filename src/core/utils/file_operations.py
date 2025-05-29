@@ -1,9 +1,9 @@
-import io
-import zipfile
 import logging
 import os
 import csv
-from typing import List, Dict, BinaryIO, Tuple, Set, Optional
+import zipfile
+import tempfile
+from typing import List, Tuple
 from ..services.gcs_service import GCSService
 
 class FileOperations:
@@ -11,87 +11,46 @@ class FileOperations:
         """Initialize with a GCS service instance"""
         self.gcs_service = gcs_service
         self.logger = logging.getLogger(__name__)
+        # Hard-coded gcsfuse mount path
+        self.gcsfuse_mount_path = "/mnt/gcs"
         
-    def create_zip_from_gcs_objects(self, source_bucket: str, object_paths: List[str], 
-                                   prefix: str = "") -> BinaryIO:
+    def create_zip_from_gcsfuse(self, bucket_name: str, sample_id: str) -> Tuple[str, int]:
         """
-        Create a zip file in memory from GCS objects
+        Create a zip file on disk from files in gcsfuse mount
         
         Args:
-            source_bucket: Source bucket name
-            object_paths: List of object paths in the bucket
-            prefix: Optional prefix to filter objects
+            bucket_name: The bucket name
+            sample_id: The sample ID
             
         Returns:
-            A file-like object containing the zip data
+            Tuple of (path to zip file, number of files included)
         """
-        zip_buffer = io.BytesIO()
+        # Get the gcsfuse path for the sample
+        sample_path = self.get_sample_path(bucket_name, sample_id)
         
-        with zipfile.ZipFile(file=zip_buffer, mode='a', compression=zipfile.ZIP_DEFLATED, allowZip64=True) as zip_file:
-            for object_path in object_paths:
-                if not object_path.startswith(prefix):
-                    continue
-                    
-                try:
-                    # Download the object content
-                    content = self.gcs_service.download_as_bytes(source_bucket, object_path)
-                    
-                    # Remove the prefix for the zip file structure if needed
-                    arcname = object_path
-                    if prefix and object_path.startswith(prefix):
-                        arcname = object_path[len(prefix):]
-                        if arcname.startswith('/'):
-                            arcname = arcname[1:]
-                    
-                    # Add to zip
-                    zip_file.writestr(arcname, content)
-                    self.logger.info(f"Added {object_path} to zip")
-                    
-                except Exception as e:
-                    self.logger.error(f"Error adding {object_path} to zip: {str(e)}")
+        # Create a temporary file for the zip
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.zip', delete=False) as tmp_file:
+            zip_path = tmp_file.name
         
-        # Reset the buffer position to the start
-        zip_buffer.seek(0)
-        return zip_buffer
-    
-    def create_zip_from_sample_id(self, source_bucket: str, sample_id: str,
-                                prefix: str = "") -> Tuple[BinaryIO, int]:
-        """
-        Create a zip file containing all files for a specific sample ID
+        file_count = 0
         
-        Args:
-            source_bucket: Source bucket name
-            sample_id: The sample ID to filter files
-            prefix: Optional additional prefix
-            
-        Returns:
-            Tuple of (file-like zip object, number of files included)
-        """
-        # Get default prefix from environment if none is provided
-        default_prefix = os.environ.get("DEFAULT_SOURCE_PREFIX", "")
+        # Create the zip file
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            # Walk through all files in the sample directory
+            for root, dirs, files in os.walk(sample_path):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    # Calculate the archive name (relative path within the zip)
+                    arcname = os.path.relpath(file_path, sample_path)
+                    try:
+                        zip_file.write(file_path, arcname)
+                        file_count += 1
+                        self.logger.info(f"Added {arcname} to zip")
+                    except Exception as e:
+                        self.logger.error(f"Error adding {file_path} to zip: {str(e)}")
         
-        # Combine default prefix with any explicitly passed prefix
-        if default_prefix and prefix:
-            combined_prefix = f"{default_prefix}/{prefix}"
-        elif default_prefix:
-            combined_prefix = default_prefix
-        else:
-            combined_prefix = prefix
+        return zip_path, file_count
         
-        # Use the combined prefix
-        if combined_prefix:
-            full_prefix = f"{combined_prefix}/{sample_id}"
-        else:
-            full_prefix = sample_id
-            
-        # List all objects for this sample
-        objects = self.gcs_service.list_objects(source_bucket, full_prefix)
-        object_paths = [obj.name for obj in objects]
-        
-        # Create zip from these objects
-        zip_buffer = self.create_zip_from_gcs_objects(source_bucket, object_paths, "")
-        return zip_buffer, len(object_paths)
-    
     def process_batch_file(self, file_obj, has_header: bool = True) -> List[str]:
         """
         Process a batch file (CSV or TXT) containing sample IDs
@@ -129,46 +88,18 @@ class FileOperations:
         
         return sample_ids
     
-    def bulk_copy_samples(self, source_bucket: str, destination_bucket: str, 
-                        sample_ids: List[str], prefix: str = "") -> Dict[str, int]:
+    def get_sample_path(self, bucket_name: str, sample_id: str) -> str:
         """
-        Copy multiple samples from source to destination bucket
+        Get the full gcsfuse path for a sample
         
         Args:
-            source_bucket: Source bucket name
-            destination_bucket: Destination bucket name
-            sample_ids: List of sample IDs to copy
-            prefix: Optional prefix for source objects
+            bucket_name: The bucket name
+            sample_id: The sample ID
             
         Returns:
-            Dictionary with sample_id: count of files copied
+            Full path to the sample directory
         """
-        results = {}
-        
-        for sample_id in sample_ids:
-            if prefix:
-                full_prefix = f"{prefix}/{sample_id}"
-            else:
-                full_prefix = sample_id
-                
-            # List all objects for this sample
-            objects = self.gcs_service.list_objects(source_bucket, full_prefix)
-            
-            # Copy each object
-            count = 0
-            for obj in objects:
-                try:
-                    self.gcs_service.copy_object(
-                        source_bucket, obj.name,
-                        destination_bucket, obj.name
-                    )
-                    count += 1
-                except Exception as e:
-                    self.logger.error(f"Error copying {obj.name}: {str(e)}")
-            
-            results[sample_id] = count
-            
-        return results
+        return os.path.join(self.gcsfuse_mount_path, bucket_name, "FulgentTF", sample_id)
     
     def clean_filename(self, filename: str) -> str:
         """
@@ -183,3 +114,73 @@ class FileOperations:
         # Replace problematic characters
         cleaned = filename.replace('/', '_').replace(' ', '_')
         return cleaned 
+
+    def upload_zip_to_gcsfuse(self, bucket_name: str, sample_id: str, zip_path: str) -> str:
+        """
+        Upload zip file directly through gcsfuse mount
+        
+        Returns:
+            The relative path of the uploaded file in the bucket
+        """
+        import uuid
+        import shutil
+        
+        try:
+            # Create unique filename
+            unique_id = uuid.uuid4().hex[:8]
+            zip_filename = f"{sample_id}_{unique_id}.zip"
+            
+            # Destination path through gcsfuse
+            pf_data_returns_path = os.path.join(self.gcsfuse_mount_path, bucket_name, "pf_data_returns")
+            
+            # Create pf_data_returns directory if it doesn't exist
+            self.logger.info(f"Ensuring directory exists: {pf_data_returns_path}")
+            os.makedirs(pf_data_returns_path, exist_ok=True)
+            
+            destination_path = os.path.join(pf_data_returns_path, zip_filename)
+            
+            # Copy the zip file
+            self.logger.info(f"Copying {zip_path} to {destination_path}")
+            shutil.copy2(zip_path, destination_path)
+            
+            self.logger.info(f"Uploaded {zip_filename} via gcsfuse to pf_data_returns/")
+            
+            return f"pf_data_returns/{zip_filename}"
+            
+        except Exception as e:
+            self.logger.error(f"Error in upload_zip_to_gcsfuse: {str(e)}")
+            self.logger.error(f"zip_path: {zip_path}")
+            self.logger.error(f"destination_path: {destination_path if 'destination_path' in locals() else 'undefined'}")
+            raise 
+
+    def upload_zip_to_gcs_via_gsutil(self, bucket_name: str, sample_id: str, zip_path: str) -> str:
+        """
+        Upload zip file using gsutil command instead of gcsfuse (better for large files)
+        
+        Returns:
+            The relative path of the uploaded file in the bucket
+        """
+        import uuid
+        import subprocess
+        
+        try:
+            # Create unique filename
+            unique_id = uuid.uuid4().hex[:8]
+            zip_filename = f"{sample_id}_{unique_id}.zip"
+            gcs_path = f"gs://{bucket_name}/pf_data_returns/{zip_filename}"
+            
+            # Use gsutil to copy
+            self.logger.info(f"Uploading {zip_path} to {gcs_path} via gsutil")
+            result = subprocess.run(['gsutil', 'cp', zip_path, gcs_path], 
+                                  capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                raise Exception(f"gsutil copy failed: {result.stderr}")
+            
+            self.logger.info(f"Uploaded {zip_filename} via gsutil to pf_data_returns/")
+            return f"pf_data_returns/{zip_filename}"
+            
+        except Exception as e:
+            self.logger.error(f"Error in upload_zip_to_gcs_via_gsutil: {str(e)}")
+            self.logger.error(f"zip_path: {zip_path}")
+            raise 

@@ -3,7 +3,8 @@ import time
 import logging
 import uuid
 import re
-from typing import Tuple, Optional
+import os
+from typing import Tuple, Optional, List
 
 from ..services.gcs_service import GCSService
 from ..services.email_service import EmailService
@@ -85,7 +86,7 @@ def share_single_sample(
     expiration_days: int
 ):
     """
-    Share a single sample with a recipient
+    Share a single sample with a recipient by creating a zip file using gcsfuse
     
     Args:
         gcs_service: GCS service instance
@@ -104,105 +105,104 @@ def share_single_sample(
     status_text = st.empty()
     
     try:
-        # Step 1: Update status
-        status_text.text("Step 1/4: Creating zip file from sample data...")
+        # Step 1: Check if sample exists
+        status_text.text("Step 1/5: Checking sample data...")
         
-        # Create zip file in memory
-        zip_buffer, file_count = file_ops.create_zip_from_sample_id(
-            source_bucket=source_bucket,
-            sample_id=sample_id
-        )
+        # List all objects for this sample to verify it exists
+        objects = gcs_service.list_objects(source_bucket, f"FulgentTF/{sample_id}")
         
-        if file_count == 0:
+        if not objects:
             st.error(f"No files found for sample ID: {sample_id}")
             return
             
-        progress_bar.progress(25)
+        progress_bar.progress(20)
         
-        # Step 2: Update status
-        status_text.text("Step 2/4: Creating temporary bucket for shared sample...")
+        # Step 2: Create zip file on disk using gcsfuse
+        status_text.text("Step 2/5: Creating zip file from sample data...")
         
-        # Create a unique bucket name for this share
-        temp_bucket_name = f"temp-share-{sample_id}-{uuid.uuid4().hex[:8]}".lower()
-        
-        # Check if bucket exists (unlikely but possible)
-        if gcs_service.bucket_exists(temp_bucket_name):
-            temp_bucket_name = f"temp-share-{sample_id}-{uuid.uuid4().hex}".lower()
-            
-        print(f"DEBUG: About to create bucket: {temp_bucket_name}")
-        
+        # Mount the source bucket with gcsfuse and create zip
         try:
-            # Create the temporary bucket
-            gcs_service.create_bucket(temp_bucket_name)
-            print("DEBUG: Bucket created successfully")
+            zip_path, file_count = file_ops.create_zip_from_gcsfuse(source_bucket, sample_id)
             
-            print("DEBUG: About to set lifecycle policy")
-            # Set lifecycle policy for automatic deletion
-            gcs_service.set_lifecycle_policy(temp_bucket_name, expiration_days)
-            print("DEBUG: Lifecycle policy set successfully")
-            
+            if file_count == 0:
+                st.error(f"No files could be added to zip for sample ID: {sample_id}")
+                return
+                
         except Exception as e:
-            print(f"DEBUG: Error in bucket operations: {e}")
-            raise e
+            st.error(f"Error creating zip file: {str(e)}")
+            st.info("Make sure gcsfuse is properly mounted and the source bucket is accessible at /mnt/gcs/")
+            return
+            
+        progress_bar.progress(40)
         
-        progress_bar.progress(50)
-        
-        # Step 3: Update status
+        # Step 3: Upload zip file to pf_data_returns via gsutil
         status_text.text("Step 3/4: Uploading zipped sample data...")
         
+        # Upload via gsutil instead of gcsfuse (better for large files)
+        zip_object_name = file_ops.upload_zip_to_gcs_via_gsutil(source_bucket, sample_id, zip_path)
+        
+        # Clean up the temporary zip file
         try:
-            # Upload the zip file to the temporary bucket
-            zip_filename = f"{sample_id}.zip"
-            print(f"DEBUG: About to upload {zip_filename} to {temp_bucket_name}")
-            
-            gcs_service.upload_from_file(
-                bucket_name=temp_bucket_name,
-                file_obj=zip_buffer,
-                destination_blob_name=zip_filename
-            )
-            print("DEBUG: Upload successful")
-            
-            # Generate a signed URL for the zip file
-            print("DEBUG: About to generate signed URL")
-            signed_url = gcs_service.generate_signed_url(
-                bucket_name=temp_bucket_name,
-                object_name=zip_filename,
+            logger.info(f"Attempting to remove temporary zip file: {zip_path}")
+            os.remove(zip_path)
+            logger.info(f"Successfully removed temporary zip file: {zip_path}")
+        except Exception as e:
+            logger.error(f"Could not remove temporary zip file {zip_path}: {str(e)} (Error type: {type(e).__name__})")
+        
+        progress_bar.progress(60)
+        
+        # Step 4: Generate download URL
+        status_text.text("Step 4/4: Generating download link...")
+        
+        # Try to generate a signed URL first
+        try:
+            download_url = gcs_service.generate_signed_url(
+                bucket_name=source_bucket,
+                object_name=zip_object_name,
                 expiration=expiration_days
             )
-            print(f"DEBUG: Signed URL generated: {signed_url[:50]}...")
-            
-            progress_bar.progress(75)
-            
-            # Step 4: Update status
-            status_text.text("Step 4/4: Sending email notification...")
-            
-            print("DEBUG: About to send email")
-            # Send email with the signed URL
-            email_sent = email_service.send_single_sample_notification(
-                recipient_email=recipient_email,
-                sample_id=sample_id,
-                download_url=signed_url,
-                expires_days=expiration_days
-            )
-            print(f"DEBUG: Email sent: {email_sent}")
-            
-            if not email_sent:
-                st.warning("Failed to send email notification, but the sample is shared")
-            
-            print("DEBUG: About to add tracking record")
-            # Add record to tracking service
-            tracking_service.add_single_sample_record(
-                sample_id=sample_id,
-                recipient_email=recipient_email,
-                source_bucket=source_bucket,
-                temp_bucket=temp_bucket_name,
-                expiration_days=expiration_days
-            )
-            print("DEBUG: Tracking record added successfully")
-            
+            logger.info("Successfully generated signed URL")
         except Exception as e:
-            print(f"DEBUG: Error occurred at: {e}")
-            raise e
+            logger.warning(f"Could not generate signed URL: {str(e)}")
+            
+            # Fall back to granting access and providing direct URL
+            try:
+                gcs_service.grant_object_access(
+                    bucket_name=source_bucket,
+                    object_name=zip_object_name,
+                    email=recipient_email
+                )
+                logger.info(f"Granted object access to {recipient_email}")
+            except Exception as e2:
+                logger.warning(f"Could not grant object-level access: {str(e2)}")
+            
+            # Provide direct GCS URL (user will need to authenticate with Google)
+            download_url = f"https://storage.googleapis.com/{source_bucket}/{zip_object_name}"
+        
+        progress_bar.progress(80)
+        
+        # Step 5: Send notification email
+        status_text.text("Step 5/5: Sending email notification...")
+        
+        # Send email with the signed URL
+        email_sent = email_service.send_single_sample_notification(
+            recipient_email=recipient_email,
+            sample_id=sample_id,
+            download_url=download_url,
+            expires_days=expiration_days
+        )
+        
+        if not email_sent:
+            st.warning("Failed to send email notification, but the sample is shared")
+        
+        # Add record to tracking service (update to use same bucket)
+        tracking_service.add_single_sample_record(
+            sample_id=sample_id,
+            recipient_email=recipient_email,
+            source_bucket=source_bucket,
+            temp_bucket=source_bucket,  # Same bucket now
+            expiration_days=expiration_days
+        )
         
         progress_bar.progress(100)
         status_text.text("Sample shared successfully!")
@@ -213,10 +213,10 @@ def share_single_sample(
         
         # Display the URL (for testing purposes, can be removed in production)
         with st.expander("Show download URL (for testing)"):
-            st.write(signed_url)
+            st.write(download_url)
             
     except Exception as e:
         logger.error(f"Error sharing sample: {str(e)}")
         st.error(f"Error sharing sample: {str(e)}")
         # Reset the progress bar on error
-        progress_bar.progress(0) 
+        progress_bar.progress(0)

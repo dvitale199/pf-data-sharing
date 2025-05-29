@@ -1,187 +1,225 @@
-# GCS Data Sharing Service
+# GCP Data Sharing Portal
 
-A Cloud Run service for securely sharing specific GCS folders with individual users.
+A Streamlit-based application for sharing data samples from Google Cloud Storage with automatic expiration and tracking. **Now optimized with gcsfuse for improved performance!**
 
-## Overview
+## 🚀 Performance Optimizations
 
-This application allows administrators to:
-1. Select specific sample folders from a source GCS bucket
-2. Copy them to individual user-specific buckets
-3. Grant temporary access to specific users by email
-4. Provide users with a download link for the data as a ZIP file
-
-## Architecture
-
-The service combines both the backend API and frontend admin interface in a single service:
-
-- **Backend API**: FastAPI REST API for handling bucket operations
-- **Frontend**: Streamlit admin interface
-- **Storage**: Google Cloud Storage buckets
-- **Deployment**: Single Google Cloud Run service
+This application has been optimized to use gcsfuse, which provides:
+- **Efficient zip creation** - Zip files are created on disk using gcsfuse mounted files (no more in-memory operations)
+- **Faster operations** - Direct bucket-to-bucket copying without downloading
+- **Lower memory usage** - No need to buffer large files in memory
+- **Scalable** - Can handle much larger samples without memory constraints
 
 ## Features
 
-- Admin interface for selecting specific samples to share
-- Secure sharing with specific users via email
-- Automatic zip file creation for easy downloads
-- Background processing for large files (5GB+)
-- Time-limited access with bucket lifecycle policies (7 days)
-- Status tracking for copy operations
+- **Single Sample Sharing**: Create a zip file of a sample on disk and share via email with a signed URL
+- **Multi-Sample Sharing**: Copy multiple samples to a new bucket with automatic cleanup
+- **Automatic Expiration**: Shared data automatically expires after a configurable period
+- **Email Notifications**: Recipients receive email with download links or bucket access instructions
+- **Tracking System**: Monitor all shared samples and their expiration status
 
-## Setup and Deployment
+## Prerequisites
 
-### Prerequisites
+- Python 3.9+
+- Google Cloud Project with Storage API enabled
+- Service account with appropriate permissions
+- SMTP email credentials (Gmail or other provider)
+- gcsfuse (for local development)
 
-- Google Cloud Platform account
-- GCP Project with billing enabled
-- Google Cloud Storage bucket containing sample data
-- Service account with appropriate permissions:
-  - Storage Admin (roles/storage.admin)
-  - Storage Object Admin (roles/storage.objectAdmin)
-
-### Environment Variables
-
-The application requires several environment variables for proper configuration. Create a `.env` file in the project root or set these variables in your deployment environment:
-
-**Quick Start**: Copy `env.example` to `.env` and update with your values:
-```bash
-cp env.example .env
-```
-
-#### Required Variables
-
-```bash
-# Email Configuration (Required)
-EMAIL_USERNAME=your-email@example.com
-EMAIL_PASSWORD=your-app-password-or-smtp-password
-```
-
-#### Optional Variables with Defaults
-
-```bash
-# Source Bucket Configuration
-DEFAULT_SOURCE_BUCKET=your-source-bucket-name
-
-# Email Server Settings (defaults shown)
-EMAIL_SMTP_SERVER=smtp.gmail.com
-EMAIL_SMTP_PORT=587
-EMAIL_USE_TLS=True
-EMAIL_FROM_ADDRESS=your-email@example.com  # defaults to EMAIL_USERNAME
-
-# Expiration Settings (in days)
-DEFAULT_SINGLE_EXPIRATION_DAYS=7
-DEFAULT_MULTI_EXPIRATION_DAYS=30
-
-# Source Data Prefix (if your data is nested in a subfolder)
-DEFAULT_SOURCE_PREFIX=path/to/samples
-
-# Logging
-LOGGING_LEVEL=INFO
-```
-
-#### GCP Authentication
-
-```bash
-# Option 1: Service Account Key File
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json
-
-# Option 2: Use gcloud CLI authentication (for local development)
-# Run: gcloud auth application-default login
-```
-
-#### Email Setup Notes
-
-For **Gmail** users:
-1. Enable 2-factor authentication on your Google account
-2. Generate an "App Password" for this application
-3. Use your Gmail address as `EMAIL_USERNAME`
-4. Use the generated app password as `EMAIL_PASSWORD`
-
-For **other SMTP providers**, adjust the `EMAIL_SMTP_SERVER` and `EMAIL_SMTP_PORT` accordingly.
-
-#### Example .env File
-
-```bash
-# Required
-EMAIL_USERNAME=myapp@gmail.com
-EMAIL_PASSWORD=abcd-efgh-ijkl-mnop
-
-# Optional but recommended
-DEFAULT_SOURCE_BUCKET=my-data-bucket
-EMAIL_FROM_ADDRESS=Data Sharing Portal <myapp@gmail.com>
-DEFAULT_SINGLE_EXPIRATION_DAYS=7
-DEFAULT_MULTI_EXPIRATION_DAYS=30
-LOGGING_LEVEL=INFO
-
-# If using service account
-GOOGLE_APPLICATION_CREDENTIALS=./credentials.json
-```
+## Installation
 
 ### Local Development
 
-1. Clone this repository
-2. Create a `.env` file with the required environment variables (see Environment Variables section above)
-3. Create a `credentials.json` file with your GCP service account credentials (if using service account authentication)
-4. Navigate to the app directory:
-   ```
-   cd app
-   ```
-5. Install dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
-6. Run the application:
-   ```
-   python main.py
-   ```
-7. Access the admin UI at http://localhost:8000/ui/
-   - Default login: username: `admin` / password: `admin`
+1. Clone the repository:
+```bash
+git clone <repository-url>
+cd gcp-data-sharing-portal
+```
 
-### Cloud Run Deployment
+2. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
 
-1. Make the deployment script executable:
-   ```bash
-   chmod +x deploy-combined.sh
-   ```
+3. Install gcsfuse:
+```bash
+# On Ubuntu/Debian
+export GCSFUSE_REPO=gcsfuse-`lsb_release -c -s`
+echo "deb https://packages.cloud.google.com/apt $GCSFUSE_REPO main" | sudo tee /etc/apt/sources.list.d/gcsfuse.list
+curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+sudo apt-get update
+sudo apt-get install gcsfuse
+```
 
-2. Update the SOURCE_BUCKET variable in the script to point to your source bucket
+4. Set up environment variables:
+```bash
+cp env.example .env
+# Edit .env with your configuration
+```
 
-3. Run the deployment script:
-   ```bash
-   ./deploy-combined.sh
-   ```
+5. Configure Google Cloud authentication:
+```bash
+# Option 1: Service account key (REQUIRED for signed URLs)
+# Place your service account key file at ~/data-tecnica-8d915e1082d7.json
+# Or set the path via environment variable:
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/your/service-account-key.json
 
-4. After deployment, you'll receive URLs for:
-   - Admin Panel: https://[service-url]/ui/
-   - API: https://[service-url]/api/
+# Option 2: Application default credentials (limited functionality)
+gcloud auth application-default login
+```
+
+6. Load environment variables and run with gcsfuse:
+```bash
+# Load all environment variables from .env file
+set -a; source .env; set +a
+
+# Run the startup script
+./start_with_gcsfuse.sh
+```
+
+### Running on a GCP VM
+
+When running on a Compute Engine VM:
+
+1. Ensure the VM has the required scopes:
+```bash
+# Check current scopes
+curl -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/scopes
+
+# Should include: https://www.googleapis.com/auth/devstorage.read_write
+```
+
+2. Use a service account key for full functionality:
+```bash
+# The default Compute Engine service account cannot generate signed URLs
+# Upload a service account key with Storage Admin permissions
+```
+
+3. Load environment variables before running:
+```bash
+# This exports all variables in .env file to child processes
+set -a; source .env; set +a
+
+# Then run the application
+./start_with_gcsfuse.sh
+```
+
+### Docker Deployment
+
+1. Build the Docker image:
+```bash
+docker build -t gcp-data-sharing .
+```
+
+2. Run with docker-compose:
+```bash
+# Copy and edit the example file
+cp docker-compose.example.yml docker-compose.yml
+# Edit docker-compose.yml with your configuration
+
+# Run the container
+docker-compose up
+```
+
+## Configuration
+
+### Required Environment Variables
+
+- `EMAIL_USERNAME`: SMTP username for sending emails
+- `EMAIL_PASSWORD`: SMTP password or app-specific password
+- `DEFAULT_SOURCE_BUCKET`: Default source bucket name
+
+### Loading Environment Variables
+
+The application requires environment variables to be **exported** (not just set in the current shell). Use this command to load and export all variables from your `.env` file:
+
+```bash
+set -a; source .env; set +a
+```
+
+**What this does:**
+- `set -a`: Automatically export all variables that are set
+- `source .env`: Load variables from the .env file
+- `set +a`: Turn off automatic export
+
+This ensures that child processes (like the Python application) can access the environment variables.
+
+### Optional Environment Variables
+
+- `EMAIL_SMTP_SERVER`: SMTP server address (default: smtp.gmail.com)
+- `EMAIL_SMTP_PORT`: SMTP server port (default: 587)
+- `EMAIL_USE_TLS`: Use TLS for SMTP (default: True)
+- `EMAIL_FROM_ADDRESS`: From address for emails (default: EMAIL_USERNAME)
+- `DEFAULT_SINGLE_EXPIRATION_DAYS`: Default expiration for single samples (default: 7)
+- `DEFAULT_MULTI_EXPIRATION_DAYS`: Default expiration for multiple samples (default: 30)
+
+### Google Cloud Permissions
+
+The service account needs the following roles:
+- `roles/storage.admin` on source and destination buckets
+- `roles/iam.serviceAccountTokenCreator` for generating signed URLs
 
 ## Usage
 
-1. Log in to the admin panel
-2. Select the sample you want to share (e.g., `889-6625`)
-3. Enter the recipient's email address
-4. Click "Create Share"
-5. Share the download link with the user
-6. The user can download all files as a ZIP by visiting the link
+1. **Configure Source Bucket**: Enter the source bucket name in the sidebar
 
-## Security Considerations
+2. **Share Single Sample**:
+   - Enter the sample ID
+   - Enter recipient email
+   - Set expiration period
+   - Click "Share Sample"
+   - The app creates a zip file on disk using gcsfuse
+   - Recipients receive a download link for the zip file
 
-- The admin UI should be protected with appropriate authentication
-- For production use, consider:
-  - Using Identity-Aware Proxy (IAP) to protect the admin interface
-  - Implementing a more robust authentication system
-  - Setting up HTTPS for secure communication
+3. **Share Multiple Samples**:
+   - Upload a CSV/TXT file with sample IDs or enter manually
+   - Enter recipient email
+   - Choose to create new bucket or use existing
+   - Set expiration period
+   - Click "Share Samples"
+   - Recipients will receive bucket access
 
-## Bucket Structure
+4. **Track & Manage**:
+   - View all shared samples
+   - Monitor expiration status
+   - See sharing history
 
-The samples should be stored in the source bucket using a consistent path structure, such as:
-```
-gs://your-source-bucket-name/path/to/889-6625/
-                                     /file1.txt
-                                     /file2.jpg
-                                     /subfolder/file3.csv
-```
+## Architecture
+
+The application uses:
+- **Streamlit** for the web interface
+- **Google Cloud Storage** for data storage
+- **gcsfuse** for efficient file access (mounted at `/mnt/gcs`)
+- **SMTP** for email notifications
+- **Signed URLs** for secure, temporary access
+
+## Docker Deployment Notes
+
+When running in Docker, the container requires special privileges for gcsfuse:
+- `SYS_ADMIN` capability
+- Access to `/dev/fuse` device
+- AppArmor unconfined (or appropriate profile)
+
+See `docker-compose.example.yml` for the complete configuration.
+
+## Troubleshooting
+
+### GCSFuse Issues
+- Ensure the container has required capabilities (SYS_ADMIN)
+- Verify credentials have bucket access
+- Check bucket name is correct
+- Make sure the source bucket is mounted at `/mnt/gcs/{bucket-name}`
+
+### Email Issues
+- For Gmail: Use app-specific password with 2FA enabled
+- Check firewall rules for SMTP ports
+- Verify SMTP server settings
+
+### Performance
+- With gcsfuse, zip files are created on disk rather than in memory
+- Large samples can be zipped without memory constraints
+- Bucket-to-bucket copies remain fast for multi-sample sharing
 
 ## License
 
-MIT 
+[Your License Here] 

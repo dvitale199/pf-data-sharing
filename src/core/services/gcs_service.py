@@ -3,12 +3,22 @@ from google.cloud.storage import Bucket, Blob
 import datetime
 import logging
 from typing import List, Dict, Optional, Union, Tuple
+import subprocess
+import os
 
 class GCSService:
     def __init__(self):
         """Initialize the Google Cloud Storage client"""
-        self.client = storage.Client()
-        self.logger = logging.getLogger(__name__)
+        # Check if a service account key file is available
+        key_file = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', '/home/vitaled2/data-tecnica-8d915e1082d7.json')
+        if os.path.exists(key_file):
+            self.client = storage.Client.from_service_account_json(key_file)
+            self.logger = logging.getLogger(__name__)
+            self.logger.info(f"Using service account key file: {key_file}")
+        else:
+            self.client = storage.Client()
+            self.logger = logging.getLogger(__name__)
+            self.logger.info("Using default application credentials")
     
     def bucket_exists(self, bucket_name: str) -> bool:
         """Check if a bucket exists"""
@@ -84,6 +94,48 @@ class GCSService:
         
         return url
     
+    def generate_signed_url_via_gsutil(self, bucket_name: str, object_name: str, 
+                                      expiration: int = 7) -> str:
+        """Generate a signed URL using gsutil (works with Compute Engine service accounts)"""
+        # Calculate expiration time in gsutil format (e.g., "7d" for 7 days)
+        expiration_str = f"{expiration}d"
+        gcs_path = f"gs://{bucket_name}/{object_name}"
+        
+        try:
+            result = subprocess.run([
+                'gsutil', 'signurl', '-d', expiration_str, 
+                '/dev/null',  # Dummy key file (gsutil will use service account)
+                gcs_path
+            ], capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                # Try alternative approach for service accounts
+                result = subprocess.run([
+                    'gsutil', 'signurl', '-d', expiration_str, 
+                    gcs_path
+                ], capture_output=True, text=True)
+                
+                if result.returncode != 0:
+                    raise Exception(f"gsutil signurl failed: {result.stderr}")
+            
+            # Parse the output to extract the URL
+            lines = result.stdout.strip().split('\n')
+            for line in lines:
+                if line.startswith('https://'):
+                    return line.strip()
+            
+            # If no direct URL found, try to extract from the last line
+            if lines:
+                parts = lines[-1].split('\t')
+                if len(parts) >= 2:
+                    return parts[-1].strip()
+            
+            raise Exception("Could not parse signed URL from gsutil output")
+            
+        except Exception as e:
+            self.logger.error(f"Error generating signed URL via gsutil: {str(e)}")
+            raise
+    
     def set_lifecycle_policy(self, bucket_name: str, days_to_deletion: int = 30) -> None:
         """Set lifecycle policy for a bucket to delete objects after specified days"""
         bucket = self.get_bucket(bucket_name)
@@ -122,12 +174,6 @@ class GCSService:
             self.logger.error(f"Error deleting {bucket_name}/{object_name}: {str(e)}")
             return False
     
-    def download_as_bytes(self, bucket_name: str, object_name: str) -> bytes:
-        """Download an object as bytes"""
-        bucket = self.get_bucket(bucket_name)
-        blob = bucket.blob(object_name)
-        return blob.download_as_bytes()
-    
     def grant_access(self, bucket_name: str, email: str, role: str = "roles/storage.objectViewer") -> None:
         """Grant access to a bucket for a user with the specified role"""
         bucket = self.get_bucket(bucket_name)
@@ -138,4 +184,17 @@ class GCSService:
         )
         
         bucket.set_iam_policy(policy)
-        self.logger.info(f"Granted {role} access to {email} for bucket {bucket_name}") 
+        self.logger.info(f"Granted {role} access to {email} for bucket {bucket_name}")
+    
+    def grant_object_access(self, bucket_name: str, object_name: str, email: str, role: str = "roles/storage.objectViewer") -> None:
+        """Grant access to a specific object for a user with the specified role"""
+        bucket = self.get_bucket(bucket_name)
+        blob = bucket.blob(object_name)
+        
+        policy = blob.get_iam_policy()
+        policy.bindings.append(
+            {"role": role, "members": [f"user:{email}"]}
+        )
+        
+        blob.set_iam_policy(policy)
+        self.logger.info(f"Granted {role} access to {email} for object {bucket_name}/{object_name}") 

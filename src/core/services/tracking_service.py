@@ -4,7 +4,7 @@ import logging
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Union, Any
-from ..services.gcs_service import GCSService
+from src.core.services.gcs_service import GCSService
 
 class TrackingService:
     def __init__(self, gcs_service: Optional[GCSService] = None):

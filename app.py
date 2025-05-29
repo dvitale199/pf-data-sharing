@@ -103,6 +103,7 @@ def main():
     # Show environment info
     st.sidebar.title("Environment")
     st.sidebar.info(f"Project: {project_id}")
+    st.sidebar.success("✓ GCSFuse enabled at /mnt/gcs")
     
     # Render the selected page
     if page == "Home":
@@ -145,6 +146,9 @@ def render_home_page(source_bucket: str):
             gcs_service = init_services()["gcs_service"]
             if gcs_service.bucket_exists(source_bucket):
                 st.success(f"Source bucket configured: {source_bucket}")
+                
+                # Show gcsfuse path
+                st.info(f"GCSFuse mount available at: `/mnt/gcs/{source_bucket}/`")
                 
                 # Show a preview of objects in the bucket
                 st.text("Recent objects in bucket:")

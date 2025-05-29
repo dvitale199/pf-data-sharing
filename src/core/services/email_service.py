@@ -3,7 +3,7 @@ import logging
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from typing import List
+from typing import List, Optional, Dict
 from datetime import datetime, timedelta
 
 class EmailService:
@@ -30,15 +30,18 @@ class EmailService:
         self.logger = logging.getLogger(__name__)
         
     def send_single_sample_notification(self, recipient_email: str, sample_id: str, 
-                                      download_url: str, expires_days: int = 7) -> bool:
+                                      download_url: Optional[str] = None, 
+                                      download_urls: Optional[List[Dict[str, str]]] = None,
+                                      expires_days: int = 7) -> bool:
         """
-        Send a notification email with download link for a single sample
+        Send a notification email with download links for a single sample
         
         Args:
             recipient_email: Email address of the recipient
             sample_id: ID of the sample being shared
-            download_url: Signed URL for downloading the sample
-            expires_days: Number of days until the link expires
+            download_url: Single signed URL for downloading (backward compatibility)
+            download_urls: List of dicts with 'filename' and 'url' keys
+            expires_days: Number of days until the links expire
             
         Returns:
             Boolean indicating success or failure
@@ -48,13 +51,26 @@ class EmailService:
         expiration_date = datetime.now() + timedelta(days=expires_days)
         expiration_str = expiration_date.strftime("%Y-%m-%d %H:%M:%S")
         
+        # Build download links HTML
+        if download_urls:
+            links_html = "<h3>Download Links:</h3><ul>"
+            for file_info in download_urls:
+                filename = file_info['filename'].split('/')[-1]  # Get just the filename
+                links_html += f'<li><a href="{file_info["url"]}">{filename}</a></li>'
+            links_html += "</ul>"
+        elif download_url:
+            # Backward compatibility
+            links_html = f'<p><a href="{download_url}">Click here to download the data</a></p>'
+        else:
+            links_html = "<p>No download links available.</p>"
+        
         html_content = f"""
         <html>
             <body>
                 <h2>Sample Data Available</h2>
                 <p>The data for sample <strong>{sample_id}</strong> is now available for download.</p>
-                <p><a href="{download_url}">Click here to download the data</a></p>
-                <p>This link will expire on <strong>{expiration_str}</strong> ({expires_days} days from now).</p>
+                {links_html}
+                <p>These links will expire on <strong>{expiration_str}</strong> ({expires_days} days from now).</p>
                 <p>If you have any questions or issues with the download, please contact the data provider.</p>
             </body>
         </html>
