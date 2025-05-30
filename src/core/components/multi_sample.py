@@ -5,10 +5,10 @@ import uuid
 import re
 from typing import List, Dict, Optional
 
-from ..services.gcs_service import GCSService
-from ..services.email_service import EmailService
-from ..services.tracking_service import TrackingService
-from ..utils.file_operations import FileOperations
+from src.core.services.gcs_service import GCSService
+from src.core.services.email_service import EmailService
+from src.core.services.tracking_service import TrackingService
+from src.core.utils.file_operations import FileOperations
 
 def validate_email(email: str) -> bool:
     """Validate email format"""
@@ -144,6 +144,12 @@ def render_multi_sample_component(
                 st.error("Please enter a valid email address")
                 return
                 
+            if destination_bucket == source_bucket:
+                st.error("""⚠️ Security Error: Cannot use source bucket as destination. 
+                         This would grant recipient access to ALL data in the source bucket. 
+                         Please choose a different destination bucket.""")
+                return
+                
             # Share the samples
             share_multi_samples(
                 gcs_service=gcs_service,
@@ -233,7 +239,7 @@ def share_multi_samples(
             
             # Copy this sample's objects
             try:
-                objects = gcs_service.list_objects(source_bucket, sample_id)
+                objects = gcs_service.list_objects(source_bucket, f"FulgentTF/{sample_id}")
                 
                 # Skip if no objects found for this sample
                 if not objects:
@@ -285,13 +291,18 @@ def share_multi_samples(
                 st.warning("Failed to send email notification, but samples were shared.")
                 
             # Add record to tracking service
-            tracking_service.add_multi_sample_record(
-                sample_ids=successful_samples,
-                recipient_email=recipient_email,
-                source_bucket=source_bucket,
-                destination_bucket=destination_bucket,
-                expiration_days=expiration_days
-            )
+            try:
+                record = tracking_service.add_multi_sample_record(
+                    sample_ids=successful_samples,
+                    recipient_email=recipient_email,
+                    source_bucket=source_bucket,
+                    destination_bucket=destination_bucket,
+                    expiration_days=expiration_days
+                )
+                logger.info(f"Successfully added tracking record for {len(successful_samples)} samples")
+            except Exception as e:
+                logger.error(f"Failed to add tracking record: {str(e)}")
+                st.warning(f"Samples shared successfully, but tracking record could not be saved: {str(e)}")
         else:
             st.error("No samples were successfully copied. Nothing was shared.")
             return
@@ -308,6 +319,9 @@ def share_multi_samples(
         
         st.success(f"{successful_count} samples have been shared with {recipient_email}. "
                   f"The data will expire in {expiration_days} days.")
+        
+        # Add prominent navigation guidance
+        st.info("📊 **To view this share record:** Use the sidebar navigation to go to **'Track & Manage'** page")
         
         if failed_count > 0:
             st.warning(f"{failed_count} samples could not be shared (not found or error occurred).")

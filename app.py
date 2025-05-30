@@ -92,18 +92,8 @@ def main():
         ["Home", "Share Single Sample", "Share Multiple Samples", "Track & Manage"]
     )
     
-    # Source bucket configuration
-    st.sidebar.title("Configuration")
-    source_bucket = st.sidebar.text_input(
-        "Source Bucket",
-        value=os.environ.get("DEFAULT_SOURCE_BUCKET", ""),
-        help="Enter the name of the source bucket containing samples"
-    )
-    
-    # Show environment info
-    st.sidebar.title("Environment")
-    st.sidebar.info(f"Project: {project_id}")
-    st.sidebar.success("✓ GCSFuse enabled at /mnt/gcs")
+    # Source bucket configuration - get from environment variable only
+    source_bucket = os.environ.get("DEFAULT_SOURCE_BUCKET", "")
     
     # Render the selected page
     if page == "Home":
@@ -138,34 +128,6 @@ def render_home_page(source_bucket: str):
     
     All shared data is automatically deleted after a configurable expiration period.
     """)
-    
-    # Source bucket status
-    st.subheader("Source Bucket Status")
-    if source_bucket:
-        try:
-            gcs_service = init_services()["gcs_service"]
-            if gcs_service.bucket_exists(source_bucket):
-                st.success(f"Source bucket configured: {source_bucket}")
-                
-                # Show gcsfuse path
-                st.info(f"GCSFuse mount available at: `/mnt/gcs/{source_bucket}/`")
-                
-                # Show a preview of objects in the bucket
-                st.text("Recent objects in bucket:")
-                objects = gcs_service.list_objects(source_bucket)
-                if objects:
-                    for obj in objects[:5]:
-                        st.code(obj.name)
-                    if len(objects) > 5:
-                        st.text(f"... and {len(objects) - 5} more")
-                else:
-                    st.info("No objects found in the bucket.")
-            else:
-                st.error(f"Source bucket {source_bucket} does not exist or you don't have access.")
-        except Exception as e:
-            st.error(f"Error checking bucket: {str(e)}")
-    else:
-        st.warning("Please configure a source bucket in the sidebar.")
 
 if __name__ == "__main__":
     main() 

@@ -2,7 +2,7 @@ from google.cloud import storage
 from google.cloud.storage import Bucket, Blob
 import datetime
 import logging
-from typing import List, Dict, Optional, Union, Tuple
+from typing import List, Dict, Optional, Union
 import subprocess
 import os
 
@@ -21,8 +21,14 @@ class GCSService:
             self.logger.info("Using default application credentials")
     
     def bucket_exists(self, bucket_name: str) -> bool:
-        """Check if a bucket exists"""
-        return self.client.bucket(bucket_name).exists()
+        """Check if a bucket exists, handling permission errors gracefully"""
+        try:
+            return self.client.bucket(bucket_name).exists()
+        except Exception as e:
+            # Log the error but don't fail completely
+            self.logger.warning(f"Cannot check bucket existence for {bucket_name}: {str(e)}")
+            # If we can't check, assume it doesn't exist so we can try to create it
+            return False
     
     def create_bucket(self, bucket_name: str, location: str = "us-central1") -> Bucket:
         """Create a new bucket with the specified name"""
@@ -44,25 +50,22 @@ class GCSService:
     def copy_object(self, source_bucket: str, source_object: str, 
                    destination_bucket: str, destination_object: str) -> Blob:
         """Copy an object from source bucket to destination bucket"""
-        source_bucket = self.get_bucket(source_bucket)
-        source_blob = source_bucket.blob(source_object)
-        
-        destination_bucket = self.get_bucket(destination_bucket)
-        dest_blob = destination_bucket.blob(destination_object)
-        
-        token = None
-        source_blob.reload()
-        
-        dest_blob.metadata = source_blob.metadata
-        dest_blob.content_type = source_blob.content_type
-        
-        token = source_bucket.copy_blob(
-            source_blob, destination_bucket, destination_object, 
-            if_source_generation_match=source_blob.generation
-        )
-        
-        self.logger.info(f"Copied {source_object} to {destination_bucket.name}/{destination_object}")
-        return dest_blob
+        try:
+            source_bucket_obj = self.get_bucket(source_bucket)
+            source_blob = source_bucket_obj.blob(source_object)
+            
+            destination_bucket_obj = self.get_bucket(destination_bucket)
+            
+            # Copy the blob
+            copied_blob = source_bucket_obj.copy_blob(
+                source_blob, destination_bucket_obj, destination_object
+            )
+            
+            self.logger.info(f"Copied {source_object} to {destination_bucket}/{destination_object}")
+            return copied_blob
+        except Exception as e:
+            self.logger.error(f"Error copying object: {str(e)}")
+            raise
     
     def upload_from_file(self, bucket_name: str, file_obj, destination_blob_name: str) -> Blob:
         """Upload data from a file-like object to a GCS bucket"""
@@ -161,18 +164,6 @@ class GCSService:
         blob = bucket.blob(object_name)
         blob.make_public()
         return blob.public_url
-    
-    def delete_object(self, bucket_name: str, object_name: str) -> bool:
-        """Delete an object from a bucket"""
-        bucket = self.get_bucket(bucket_name)
-        blob = bucket.blob(object_name)
-        try:
-            blob.delete()
-            self.logger.info(f"Deleted {bucket_name}/{object_name}")
-            return True
-        except Exception as e:
-            self.logger.error(f"Error deleting {bucket_name}/{object_name}: {str(e)}")
-            return False
     
     def grant_access(self, bucket_name: str, email: str, role: str = "roles/storage.objectViewer") -> None:
         """Grant access to a bucket for a user with the specified role"""
