@@ -17,7 +17,9 @@ class TrackingService:
         self.logger = logging.getLogger(__name__)
         self.gcs_service = gcs_service
         self.tracking_file = os.path.join(os.path.dirname(__file__), "../../../data/tracking.json")
+        self.logger.info(f"Tracking service initialized with file path: {self.tracking_file}")
         self.records = self._load_records()
+        self.logger.info(f"Loaded {len(self.records)} existing tracking records")
         
     def _load_records(self) -> List[Dict[str, Any]]:
         """Load records from tracking file or create empty list if file doesn't exist"""
@@ -36,15 +38,17 @@ class TrackingService:
     def _save_records(self) -> bool:
         """Save records to tracking file"""
         try:
+            self.logger.info(f"Attempting to save {len(self.records)} records to {self.tracking_file}")
             with open(self.tracking_file, 'w') as f:
                 json.dump(self.records, f, indent=2)
+            self.logger.info("Successfully saved tracking records")
             return True
         except Exception as e:
             self.logger.error(f"Error saving tracking records: {str(e)}")
             return False
             
     def add_single_sample_record(self, sample_id: str, recipient_email: str, 
-                              source_bucket: str, temp_bucket: str, 
+                              source_bucket: str, zip_file_path: str, 
                               expiration_days: int = 7) -> Dict[str, Any]:
         """
         Add a record for a single sample share
@@ -53,7 +57,7 @@ class TrackingService:
             sample_id: ID of the shared sample
             recipient_email: Email of the recipient
             source_bucket: Source bucket name
-            temp_bucket: Temporary bucket where sample is shared
+            zip_file_path: Full GCS path to the shared zip file (e.g., "bucket/shared-zips/sample-123.zip")
             expiration_days: Days until the share expires
             
         Returns:
@@ -67,7 +71,7 @@ class TrackingService:
             "sample_id": sample_id,
             "recipient_email": recipient_email,
             "source_bucket": source_bucket,
-            "destination": temp_bucket,
+            "zip_file_path": zip_file_path,  # Store the full path to the zip file
             "type": "single",
             "created_at": now.isoformat(),
             "expires_at": expiration_date.isoformat(),
@@ -116,6 +120,11 @@ class TrackingService:
         
         return record
         
+    def reload_records(self) -> None:
+        """Reload records from the tracking file"""
+        self.records = self._load_records()
+        self.logger.info(f"Reloaded {len(self.records)} tracking records from file")
+        
     def get_all_records(self) -> pd.DataFrame:
         """
         Get all tracking records as a DataFrame
@@ -123,6 +132,9 @@ class TrackingService:
         Returns:
             DataFrame containing all tracking records
         """
+        # Always reload from file to get the latest data
+        self.reload_records()
+        
         df = pd.DataFrame(self.records)
         if not df.empty:
             # Calculate days remaining
@@ -131,46 +143,15 @@ class TrackingService:
             now = datetime.now()
             df['days_remaining'] = (df['expires_at'] - pd.Timestamp(now)).dt.days
             
-            # Set negative days to 0 and mark as expired
+            # Only mark as expired if the expiration datetime has actually passed
+            # Keep the original active status from the file unless truly expired
+            now_timestamp = pd.Timestamp(now)
+            df.loc[df['expires_at'] <= now_timestamp, 'active'] = False
+            
+            # Set negative days to 0 for display purposes, but don't change active status
             df.loc[df['days_remaining'] < 0, 'days_remaining'] = 0
-            df.loc[df['days_remaining'] == 0, 'active'] = False
             
         return df
-        
-    def delete_record(self, record_id: str, cleanup_gcs: bool = True) -> bool:
-        """
-        Delete a tracking record and optionally cleanup GCS resources
-        
-        Args:
-            record_id: ID of the record to delete
-            cleanup_gcs: Whether to delete associated GCS resources
-            
-        Returns:
-            Boolean indicating success
-        """
-        for i, record in enumerate(self.records):
-            if record.get('id') == record_id:
-                if cleanup_gcs and self.gcs_service:
-                    try:
-                        if record.get('type') == 'single':
-                            # Delete the temporary bucket for single samples
-                            bucket_name = record.get('destination')
-                            if bucket_name:
-                                # Delete all objects first
-                                objects = self.gcs_service.list_objects(bucket_name)
-                                for obj in objects:
-                                    self.gcs_service.delete_object(bucket_name, obj.name)
-                        # For multi-sample, we don't delete the destination bucket automatically
-                        # as it might contain other data or be managed separately
-                    except Exception as e:
-                        self.logger.error(f"Error cleaning up GCS resources: {str(e)}")
-                
-                # Delete the record
-                del self.records[i]
-                self._save_records()
-                return True
-                
-        return False
         
     def update_record_status(self, record_id: str, active: bool) -> bool:
         """

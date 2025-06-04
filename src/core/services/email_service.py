@@ -46,32 +46,48 @@ class EmailService:
         Returns:
             Boolean indicating success or failure
         """
-        subject = f"Data available for sample {sample_id}"
-        
-        expiration_date = datetime.now() + timedelta(days=expires_days)
-        expiration_str = expiration_date.strftime("%Y-%m-%d %H:%M:%S")
+        subject = f"PD GENEration Raw Genetic Data - Sample {sample_id}"
         
         # Build download links HTML
         if download_urls:
-            links_html = "<h3>Download Links:</h3><ul>"
+            links_html = ""
             for file_info in download_urls:
                 filename = file_info['filename'].split('/')[-1]  # Get just the filename
-                links_html += f'<li><a href="{file_info["url"]}">{filename}</a></li>'
-            links_html += "</ul>"
+                links_html += f'<a href="{file_info["url"]}">{filename}</a><br>'
         elif download_url:
-            # Backward compatibility
-            links_html = f'<p><a href="{download_url}">Click here to download the data</a></p>'
+            # Single download link
+            links_html = f'<a href="{download_url}">Download your data</a>'
         else:
-            links_html = "<p>No download links available.</p>"
+            links_html = "[Download link not available]"
         
         html_content = f"""
         <html>
-            <body>
-                <h2>Sample Data Available</h2>
-                <p>The data for sample <strong>{sample_id}</strong> is now available for download.</p>
-                {links_html}
-                <p>These links will expire on <strong>{expiration_str}</strong> ({expires_days} days from now).</p>
-                <p>If you have any questions or issues with the download, please contact the data provider.</p>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                <p>Hello,</p>
+                
+                <p>Thank you for your interest in receiving raw genetic data files from the PD GENEration study.</p>
+                
+                <p>Please use the following link to access the data: {links_html}</p>
+                
+                <p>As per our last email, this link will only work if the email address to which you received this 
+                communication has been associated with a Google account.</p>
+                
+                <p>Of note, the raw genetic data can be rather large. It will download in a .zip format that itself may 
+                be up to 4 GB in size, and the uncompressed data can be &gt;50 GB in size. Please ensure that 
+                your computer is able to handle this amount of data or that you are able to transfer the data into 
+                your own Cloud platform.</p>
+                
+                <p>You will have {expires_days} days to download the files before the above link expires.</p>
+                
+                <p>If you have any questions, please feel free to reach out to 
+                <a href="mailto:PDGENEData@parkinson.org">PDGENEData@parkinson.org</a> or 
+                contact your PD GENEration study site. You may also call the Parkinson's Foundation helpline 
+                at 1-800-4PD-INFO.</p>
+                
+                <p>Have a great day.</p>
+                
+                <p>Best regards,<br>
+                The PD GENEration Team</p>
             </body>
         </html>
         """
@@ -116,27 +132,45 @@ class EmailService:
         Returns:
             Boolean indicating success or failure
         """
-        subject = f"Multiple samples available in Google Cloud Storage"
-        
-        expiration_date = datetime.now() + timedelta(days=expires_days)
-        expiration_str = expiration_date.strftime("%Y-%m-%d %H:%M:%S")
+        subject = f"PD GENEration Raw Genetic Data - Multiple Samples Available"
         
         # Format the sample IDs for display
         if len(sample_ids) > 10:
-            sample_display = "<br>".join(sample_ids[:10]) + f"<br>... and {len(sample_ids) - 10} more"
+            sample_display = "<br>• ".join(sample_ids[:10]) + f"<br>• ... and {len(sample_ids) - 10} more"
         else:
-            sample_display = "<br>".join(sample_ids)
+            sample_display = "<br>• ".join(sample_ids)
         
         html_content = f"""
         <html>
-            <body>
-                <h2>Multiple Samples Available</h2>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                <p>Hello,</p>
+                
+                <p>Thank you for your interest in receiving raw genetic data files from the PD GENEration study.</p>
+                
                 <p>The following samples are now available in Google Cloud Storage bucket <strong>{bucket_name}</strong>:</p>
-                <p>{sample_display}</p>
+                
+                <p style="margin-left: 20px;">
+                • {sample_display}
+                </p>
+                
                 <p>You have been granted access to this bucket. To access the data, please use the Google Cloud Console 
-                or the gsutil command-line tool.</p>
-                <p>This data will be automatically deleted on <strong>{expiration_str}</strong> ({expires_days} days from now).</p>
-                <p>If you have any questions or issues with access, please contact the data provider.</p>
+                or the gsutil command-line tool. As per our last email, this access will only work if the email address 
+                to which you received this communication has been associated with a Google account.</p>
+                
+                <p>Of note, the raw genetic data can be rather large. Each sample may contain files that are several GB 
+                in size. Please ensure that your computer or Cloud platform can handle this amount of data.</p>
+                
+                <p>You will have {expires_days} days to download the files before access expires.</p>
+                
+                <p>If you have any questions, please feel free to reach out to 
+                <a href="mailto:PDGENEData@parkinson.org">PDGENEData@parkinson.org</a> or 
+                contact your PD GENEration study site. You may also call the Parkinson's Foundation helpline 
+                at 1-800-4PD-INFO.</p>
+                
+                <p>Have a great day.</p>
+                
+                <p>Best regards,<br>
+                The PD GENEration Team</p>
             </body>
         </html>
         """

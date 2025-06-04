@@ -6,10 +6,10 @@ import re
 import os
 from typing import Tuple, Optional, List
 
-from ..services.gcs_service import GCSService
-from ..services.email_service import EmailService
-from ..services.tracking_service import TrackingService
-from ..utils.file_operations import FileOperations
+from src.core.services.gcs_service import GCSService
+from src.core.services.email_service import EmailService
+from src.core.services.tracking_service import TrackingService
+from src.core.utils.file_operations import FileOperations
 
 def validate_email(email: str) -> bool:
     """Validate email format"""
@@ -47,8 +47,8 @@ def render_single_sample_component(
         expiration_days = st.slider(
             "Link Expiration (days)", 
             min_value=1, 
-            max_value=30, 
-            value=7,
+            max_value=60, 
+            value=30,
             help="How many days until the shared sample expires"
         )
         
@@ -83,7 +83,7 @@ def share_single_sample(
     source_bucket: str,
     sample_id: str,
     recipient_email: str,
-    expiration_days: int
+    expiration_days: int,
 ):
     """
     Share a single sample with a recipient by creating a zip file using gcsfuse
@@ -195,14 +195,22 @@ def share_single_sample(
         if not email_sent:
             st.warning("Failed to send email notification, but the sample is shared")
         
-        # Add record to tracking service (update to use same bucket)
-        tracking_service.add_single_sample_record(
-            sample_id=sample_id,
-            recipient_email=recipient_email,
-            source_bucket=source_bucket,
-            temp_bucket=source_bucket,  # Same bucket now
-            expiration_days=expiration_days
-        )
+        # Add record to tracking service
+        try:
+            # Create the full zip file path for tracking
+            zip_file_path = f"{source_bucket}/{zip_object_name}"
+            
+            record = tracking_service.add_single_sample_record(
+                sample_id=sample_id,
+                recipient_email=recipient_email,
+                source_bucket=source_bucket,
+                zip_file_path=zip_file_path,
+                expiration_days=expiration_days
+            )
+            logger.info(f"Successfully added tracking record for sample {sample_id}")
+        except Exception as e:
+            logger.error(f"Failed to add tracking record: {str(e)}")
+            st.warning(f"Sample shared successfully, but tracking record could not be saved: {str(e)}")
         
         progress_bar.progress(100)
         status_text.text("Sample shared successfully!")
@@ -210,6 +218,9 @@ def share_single_sample(
         # Display success message
         st.success(f"Sample {sample_id} has been shared with {recipient_email}. "
                   f"The link will expire in {expiration_days} days.")
+        
+        # Add prominent navigation guidance
+        st.info("📊 **To view this share record:** Use the sidebar navigation to go to **'Track & Manage'** page")
         
         # Display the URL (for testing purposes, can be removed in production)
         with st.expander("Show download URL (for testing)"):
