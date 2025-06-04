@@ -67,6 +67,87 @@ class GCSService:
             self.logger.error(f"Error copying object: {str(e)}")
             raise
     
+    def copy_object_large(self, source_bucket: str, source_object: str, 
+                         destination_bucket: str, destination_object: str) -> Blob:
+        """Copy an object using the Rewrite API - suitable for large files or cross-region/storage-class copies"""
+        try:
+            source_bucket_obj = self.get_bucket(source_bucket)
+            source_blob = source_bucket_obj.blob(source_object)
+            
+            destination_bucket_obj = self.get_bucket(destination_bucket)
+            destination_blob = destination_bucket_obj.blob(destination_object)
+            
+            # Use rewrite for large files
+            token = None
+            while True:
+                token, bytes_rewritten, total_bytes = destination_blob.rewrite(
+                    source_blob, token=token
+                )
+                
+                if token is None:
+                    # Rewrite complete
+                    break
+                    
+                # Log progress for large files
+                if total_bytes > 0:
+                    progress = (bytes_rewritten / total_bytes) * 100
+                    self.logger.info(f"Rewriting {source_object}: {progress:.1f}% complete")
+            
+            self.logger.info(f"Successfully copied {source_object} to {destination_bucket}/{destination_object} using rewrite")
+            return destination_blob
+            
+        except Exception as e:
+            self.logger.error(f"Error copying large object: {str(e)}")
+            raise
+    
+    def copy_object_smart(self, source_bucket: str, source_object: str,
+                         destination_bucket: str, destination_object: str,
+                         size_threshold_mb: int = 100) -> Blob:
+        """
+        Intelligently copy an object, using regular copy for small files and rewrite for large files
+        
+        Args:
+            source_bucket: Source bucket name
+            source_object: Source object path
+            destination_bucket: Destination bucket name  
+            destination_object: Destination object path
+            size_threshold_mb: Size threshold in MB to switch to rewrite (default 100MB)
+            
+        Returns:
+            The copied blob
+        """
+        try:
+            # Get the source blob to check its size
+            source_bucket_obj = self.get_bucket(source_bucket)
+            source_blob = source_bucket_obj.blob(source_object)
+            source_blob.reload()  # Load metadata
+            
+            # Check file size
+            size_mb = (source_blob.size or 0) / (1024 * 1024)
+            
+            # Use regular copy for small files, rewrite for large files
+            if size_mb < size_threshold_mb:
+                self.logger.info(f"Using regular copy for {source_object} ({size_mb:.1f}MB)")
+                try:
+                    return self.copy_object(source_bucket, source_object, 
+                                          destination_bucket, destination_object)
+                except Exception as e:
+                    # If regular copy fails (e.g., timeout), fall back to rewrite
+                    if "30 seconds" in str(e) or "rewrite" in str(e).lower():
+                        self.logger.warning(f"Regular copy failed, falling back to rewrite: {str(e)}")
+                        return self.copy_object_large(source_bucket, source_object,
+                                                    destination_bucket, destination_object)
+                    else:
+                        raise
+            else:
+                self.logger.info(f"Using rewrite for large file {source_object} ({size_mb:.1f}MB)")
+                return self.copy_object_large(source_bucket, source_object,
+                                            destination_bucket, destination_object)
+                
+        except Exception as e:
+            self.logger.error(f"Error in smart copy: {str(e)}")
+            raise
+    
     def upload_from_file(self, bucket_name: str, file_obj, destination_blob_name: str) -> Blob:
         """Upload data from a file-like object to a GCS bucket"""
         bucket = self.get_bucket(bucket_name)

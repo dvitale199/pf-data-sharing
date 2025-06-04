@@ -50,11 +50,9 @@ def render_multi_sample_component(
             help="File should contain one sample ID per line or as the first column in CSV"
         )
         
-        has_header = st.checkbox("File has header row", value=True)
-        
         if uploaded_file is not None:
             # Process the file to extract sample IDs
-            sample_ids = file_ops.process_batch_file(uploaded_file, has_header)
+            sample_ids = file_ops.process_batch_file(uploaded_file, has_header=False)
             if sample_ids:
                 st.success(f"Found {len(sample_ids)} sample IDs in the uploaded file")
                 # Store in session state to use later
@@ -174,7 +172,7 @@ def share_multi_samples(
     sample_ids: List[str],
     recipient_email: str,
     expiration_days: int,
-    create_new_bucket: bool
+    create_new_bucket: bool,
 ):
     """
     Share multiple samples with a recipient
@@ -249,9 +247,14 @@ def share_multi_samples(
                 # Copy each object
                 count = 0
                 for obj in objects:
-                    gcs_service.copy_object(
+                    # Strip the FulgentTF/ prefix from the destination path
+                    # Convert "FulgentTF/889-6625/889-6625.bam" to "889-6625/889-6625.bam"
+                    destination_path = obj.name.replace("FulgentTF/", "", 1)
+                    
+                    # Use the large file copy method for better reliability
+                    gcs_service.copy_object_smart(
                         source_bucket, obj.name,
-                        destination_bucket, obj.name
+                        destination_bucket, destination_path
                     )
                     count += 1
                 

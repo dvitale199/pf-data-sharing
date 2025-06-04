@@ -83,7 +83,7 @@ def share_single_sample(
     source_bucket: str,
     sample_id: str,
     recipient_email: str,
-    expiration_days: int
+    expiration_days: int,
 ):
     """
     Share a single sample with a recipient by creating a zip file using gcsfuse
