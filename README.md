@@ -1,14 +1,6 @@
 # GCP Data Sharing Portal
 
-A Streamlit-based application for sharing data samples from Google Cloud Storage with automatic expiration and tracking. **Now optimized with gcsfuse for improved performance!**
-
-## 🚀 Performance Optimizations
-
-This application has been optimized to use gcsfuse, which provides:
-- **Efficient zip creation** - Zip files are created on disk using gcsfuse mounted files (no more in-memory operations)
-- **Faster operations** - Direct bucket-to-bucket copying without downloading
-- **Lower memory usage** - No need to buffer large files in memory
-- **Scalable** - Can handle much larger samples without memory constraints
+A Streamlit-based application for sharing data samples from Google Cloud Storage with automatic expiration and tracking. 
 
 ## Features
 
